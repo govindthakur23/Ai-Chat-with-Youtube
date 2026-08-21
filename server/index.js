@@ -53,7 +53,7 @@ app.post("/api/video", async (req, res) => {
     );
 
     res.status(500).json({
-      error: "Failed to process YouTube video",
+      error: error.message,
     });
   }
 });
@@ -121,7 +121,7 @@ ${videoId}
     console.error(error);
 
     res.status(500).json({
-      error: "Something went wrong",
+      error: error.message,
     });
   }
 });
