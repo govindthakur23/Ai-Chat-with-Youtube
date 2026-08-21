@@ -1,2 +1,6 @@
-.env
+@"
 node_modules/
+.env
+dist/
+*.dump
+"@ | Set-Content .gitignore
