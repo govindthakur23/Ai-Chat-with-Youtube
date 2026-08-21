@@ -3,6 +3,7 @@ import express from "express";
 import cors from "cors";
 import { agent } from "./agent.js";
 import { scrapeYouTubeVideo } from "./youtube.js";
+import { addVideoToVectorStore } from "./embeddings.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -26,20 +27,25 @@ app.post("/api/test-youtube", async (req, res) => {
             });
         }
 
+        // Scrape video from Bright Data
         const video = await scrapeYouTubeVideo(url);
+
+        // Store transcript chunks + embeddings in pgvector
+        const stored = await addVideoToVectorStore(video);
 
         res.json({
             video_id: video.video_id,
             title: video.title,
             description: video.description,
             transcript: video.transcript,
+            chunks_added: stored.chunks_added,
         });
 
     } catch (error) {
-        console.error("YouTube scraping failed:", error.message);
+        console.error("YouTube processing failed:", error.message);
 
         res.status(500).json({
-            error: "Failed to scrape YouTube video",
+            error: "Failed to process YouTube video",
         });
     }
 });
