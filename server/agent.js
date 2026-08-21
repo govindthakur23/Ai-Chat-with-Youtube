@@ -6,14 +6,21 @@ import { createAgent } from "langchain";
 import { MemorySaver } from "@langchain/langgraph";
 import { z } from "zod";
 
-import { vectorStore } from "./embeddings.js";
+import { searchVideoTranscript } from "./embeddings.js";
 
+
+// Retrieve transcript chunks for one specific video
 const retrieveTool = tool(
-  async ({ query }) => {
-    const retrievedDocs = await vectorStore.similaritySearch(
+  async ({ query, videoId }) => {
+    const retrievedDocs = await searchVideoTranscript(
       query,
+      videoId,
       3
     );
+
+    if (!retrievedDocs.length) {
+      return "No transcript information was found for this video.";
+    }
 
     return retrievedDocs
       .map((doc) => doc.pageContent)
@@ -23,15 +30,24 @@ const retrieveTool = tool(
     name: "retrieve",
 
     description:
-      "Search the YouTube video transcript for information. ALWAYS use this tool when the user asks a question about the video, its content, topics, explanations, or what will be understood from it.",
+      "Search the transcript of the currently selected YouTube video. Always use this tool before answering questions about the video.",
 
     schema: z.object({
       query: z
         .string()
-        .describe("The question or information to search for in the video transcript."),
+        .describe(
+          "The question or information to search for in the transcript."
+        ),
+
+      videoId: z
+        .string()
+        .describe(
+          "The YouTube video ID whose transcript should be searched."
+        ),
     }),
   }
 );
+
 
 const llm = new ChatOpenRouter({
   model: "openai/gpt-oss-20b:free",
@@ -39,25 +55,31 @@ const llm = new ChatOpenRouter({
   apiKey: process.env.OPEN_API_KEY,
 });
 
+
 const memorySaver = new MemorySaver();
+
 
 const agent = createAgent({
   model: llm,
+
   tools: [retrieveTool],
 
   systemPrompt: `
 You are a YouTube video assistant.
 
-You answer questions using the provided YouTube video transcript.
+You answer questions using the transcript of the selected YouTube video.
 
 IMPORTANT:
-- For any question about the video, ALWAYS call the retrieve tool first.
-- Do not guess or say you don't know which video is being referenced.
-- Use the information returned by the retrieve tool to answer.
-- If the retrieved transcript does not contain enough information, say that the transcript does not provide enough information.
+
+- Always use the retrieve tool before answering questions about a video.
+- The retrieve tool requires both query and videoId.
+- Only use information returned by the retrieve tool.
+- Do not claim you watched or directly accessed a YouTube video.
+- If the transcript does not contain enough information, say so.
 `,
-  
+
   checkpointer: memorySaver,
 });
+
 
 export { agent };

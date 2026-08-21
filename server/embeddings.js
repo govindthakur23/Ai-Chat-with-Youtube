@@ -52,10 +52,28 @@ const createVectorStore = async () => {
 
 export const vectorStore = await createVectorStore();
 
-// Add a scraped YouTube video into pgvector
+// Add scraped YouTube transcript to pgvector
 export const addVideoToVectorStore = async (video) => {
   if (!video?.transcript) {
     throw new Error("Video transcript is missing");
+  }
+
+  // Check whether this video is already stored
+  const existingDocs = await vectorStore.similaritySearch(
+    video.title || video.video_id,
+    1,
+    {
+      video_id: video.video_id,
+    }
+  );
+
+  // Don't insert duplicate transcript chunks
+  if (existingDocs.length > 0) {
+    return {
+      video_id: video.video_id,
+      chunks_added: 0,
+      already_exists: true,
+    };
   }
 
   const docs = [
@@ -80,5 +98,23 @@ export const addVideoToVectorStore = async (video) => {
   return {
     video_id: video.video_id,
     chunks_added: chunks.length,
+    already_exists: false,
   };
+};
+
+// Search only inside one video's transcript
+export const searchVideoTranscript = async (
+  query,
+  videoId,
+  limit = 3
+) => {
+  const docs = await vectorStore.similaritySearch(
+    query,
+    limit,
+    {
+      video_id: videoId,
+    }
+  );
+
+  return docs;
 };
