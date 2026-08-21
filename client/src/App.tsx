@@ -12,6 +12,10 @@ function App() {
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [threadId, setThreadId] = useState<string>(String(Date.now()));
+
+  // Store the currently selected YouTube video
+  const [videoId, setVideoId] = useState<string | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -33,12 +37,28 @@ function App() {
     }
   };
 
+  // Check whether user entered a YouTube URL
+  const isYouTubeUrl = (text: string) => {
+    try {
+      const url = new URL(text);
+
+      return (
+        url.hostname.includes('youtube.com') ||
+        url.hostname.includes('youtu.be')
+      );
+    } catch {
+      return false;
+    }
+  };
+
   const sendMessage = async () => {
     if (inputText.trim() === '' || isLoading) return;
 
-    const userMessage = {
+    const text = inputText.trim();
+
+    const userMessage: Message = {
       id: Date.now(),
-      text: inputText.trim(),
+      text,
       isUser: true,
     };
 
@@ -47,7 +67,66 @@ function App() {
     setIsLoading(true);
 
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+      const apiUrl =
+        import.meta.env.VITE_API_URL || 'http://localhost:3000';
+
+      // ------------------------------------------------
+      // CASE 1: User entered a YouTube URL
+      // ------------------------------------------------
+      if (isYouTubeUrl(text)) {
+        const response = await fetch(`${apiUrl}/api/video`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            url: text,
+          }),
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            data.error || 'Failed to process YouTube video'
+          );
+        }
+
+        // Save video ID for future chat questions
+        setVideoId(data.video_id);
+
+        // Start a fresh conversation for this video
+        setThreadId(String(Date.now()));
+
+        const aiMessage: Message = {
+          id: Date.now() + 1,
+          text: data.already_exists
+            ? `Video "${data.title}" is already loaded. You can ask me questions about it.`
+            : `Video "${data.title}" is ready. I added ${data.chunks_added} transcript chunks. You can now ask me questions about it.`,
+          isUser: false,
+        };
+
+        setMessages((prev) => [...prev, aiMessage]);
+
+        return;
+      }
+
+      // ------------------------------------------------
+      // CASE 2: User asks a question
+      // ------------------------------------------------
+
+      // Require a video before allowing questions
+      if (!videoId) {
+        const aiMessage: Message = {
+          id: Date.now() + 1,
+          text: 'Please send a YouTube video URL first.',
+          isUser: false,
+        };
+
+        setMessages((prev) => [...prev, aiMessage]);
+
+        return;
+      }
 
       const response = await fetch(`${apiUrl}/api/chat`, {
         method: 'POST',
@@ -55,19 +134,24 @@ function App() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          message: userMessage.text,
+          message: text,
           threadId: String(threadId),
+
+          // Tell backend which transcript to search
+          videoId,
         }),
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to get response');
-      }
-
       const data = await response.json();
 
-      const aiMessage = {
-        id: Date.now(),
+      if (!response.ok) {
+        throw new Error(
+          data.error || 'Failed to get response'
+        );
+      }
+
+      const aiMessage: Message = {
+        id: Date.now() + 1,
         text: data.answer,
         isUser: false,
       };
@@ -76,9 +160,14 @@ function App() {
     } catch (error) {
       console.error('Error:', error);
 
-      const errorMessage = {
-        id: Date.now(),
-        text: 'Sorry, there was an error processing your request.',
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Something went wrong';
+
+      const errorMessage: Message = {
+        id: Date.now() + 1,
+        text: `Sorry, ${message}`,
         isUser: false,
       };
 
@@ -91,12 +180,16 @@ function App() {
   const resetChat = () => {
     setMessages([]);
     setThreadId(String(Date.now()));
+
+    // Forget currently selected video
+    setVideoId(null);
   };
 
   return (
     <div className='chat-container'>
       <header className='chat-header'>
         <h1>AI Chat</h1>
+
         <button className='reset-button' onClick={resetChat}>
           <svg
             width='16'
@@ -110,6 +203,7 @@ function App() {
               fill='currentColor'
             />
           </svg>
+
           New Chat
         </button>
       </header>
@@ -117,26 +211,33 @@ function App() {
       <div className='messages-container'>
         {messages.length === 0 ? (
           <div className='empty-state'>
-            <p>Start your conversation with the AI</p>
+            <p>Paste a YouTube URL to start</p>
           </div>
         ) : (
           messages.map((message) => (
             <div
               key={message.id}
               className={`message ${
-                message.isUser ? 'user-message' : 'ai-message'
+                message.isUser
+                  ? 'user-message'
+                  : 'ai-message'
               }`}
             >
               <div className='message-avatar'>
                 {message.isUser ? 'You' : 'AI'}
               </div>
-              <div className='message-content'>{message.text}</div>
+
+              <div className='message-content'>
+                {message.text}
+              </div>
             </div>
           ))
         )}
+
         {isLoading && (
           <div className='message ai-message'>
             <div className='message-avatar'>AI</div>
+
             <div className='message-content loading'>
               <span className='dot'></span>
               <span className='dot'></span>
@@ -144,6 +245,7 @@ function App() {
             </div>
           </div>
         )}
+
         <div ref={messagesEndRef} />
       </div>
 
@@ -152,14 +254,21 @@ function App() {
           value={inputText}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
-          placeholder='Type your message...'
+          placeholder={
+            videoId
+              ? 'Ask something about the video...'
+              : 'Paste a YouTube URL...'
+          }
           disabled={isLoading}
           rows={1}
         />
+
         <button
           className='send-button'
           onClick={sendMessage}
-          disabled={inputText.trim() === '' || isLoading}
+          disabled={
+            inputText.trim() === '' || isLoading
+          }
         >
           <svg
             width='24'
