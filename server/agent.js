@@ -8,78 +8,71 @@ import { z } from "zod";
 
 import { searchVideoTranscript } from "./embeddings.js";
 
-
-// Retrieve transcript chunks for one specific video
-const retrieveTool = tool(
-  async ({ query, videoId }) => {
-    const retrievedDocs = await searchVideoTranscript(
-      query,
-      videoId,
-      3
-    );
-
-    if (!retrievedDocs.length) {
-      return "No transcript information was found for this video.";
-    }
-
-    return retrievedDocs
-      .map((doc) => doc.pageContent)
-      .join("\n\n");
-  },
-  {
-    name: "retrieve",
-
-    description:
-      "Search the transcript of the currently selected YouTube video. Always use this tool before answering questions about the video.",
-
-    schema: z.object({
-      query: z
-        .string()
-        .describe(
-          "The question or information to search for in the transcript."
-        ),
-
-      videoId: z
-        .string()
-        .describe(
-          "The YouTube video ID whose transcript should be searched."
-        ),
-    }),
-  }
-);
-
-
 const llm = new ChatOpenRouter({
   model: "openai/gpt-oss-20b:free",
   temperature: 0,
   apiKey: process.env.OPEN_API_KEY,
 });
 
-
 const memorySaver = new MemorySaver();
 
 
-const agent = createAgent({
-  model: llm,
+// Create an agent locked to one video
+export const createVideoAgent = (videoId) => {
 
-  tools: [retrieveTool],
+  // Tool already knows the current videoId
+  const retrieveTool = tool(
+    async ({ query }) => {
 
-  systemPrompt: `
+      const retrievedDocs = await searchVideoTranscript(
+        query,
+        videoId,
+        5
+      );
+
+      if (!retrievedDocs.length) {
+        return "No relevant transcript chunks were found.";
+      }
+
+      return retrievedDocs
+        .map((doc) => doc.pageContent)
+        .join("\n\n");
+    },
+    {
+      name: "retrieve",
+
+      description:
+        "Search the transcript of the currently selected YouTube video. Always use this tool for questions about the video.",
+
+      schema: z.object({
+        query: z
+          .string()
+          .describe(
+            "The information to search for in the video transcript."
+          ),
+      }),
+    }
+  );
+
+
+  return createAgent({
+    model: llm,
+
+    tools: [retrieveTool],
+
+    systemPrompt: `
 You are a YouTube video assistant.
 
-You answer questions using the transcript of the selected YouTube video.
+You answer questions only using the currently selected video's transcript.
 
 IMPORTANT:
-
-- Always use the retrieve tool before answering questions about a video.
-- The retrieve tool requires both query and videoId.
-- Only use information returned by the retrieve tool.
-- Do not claim you watched or directly accessed a YouTube video.
-- If the transcript does not contain enough information, say so.
+- Always call the retrieve tool for questions about the video.
+- Base your answer on the transcript returned by the tool.
+- For broad questions such as "key points", summarize the important topics found across the retrieved transcript chunks.
+- Do not claim you watched the video.
+- If the transcript truly does not contain enough information, clearly say so.
 `,
 
-  checkpointer: memorySaver,
-});
-
-
-export { agent };
+    checkpointer: memorySaver,
+  });
+};

@@ -2,7 +2,7 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 
-import { agent } from "./agent.js";
+import { createVideoAgent } from "./agent.js";
 import { scrapeYouTubeVideo } from "./youtube.js";
 import { addVideoToVectorStore } from "./embeddings.js";
 
@@ -58,6 +58,7 @@ app.post("/api/video", async (req, res) => {
   }
 });
 
+console.log("Bright Data video fields:", Object.keys(video));
 
 // Chat with currently selected video
 app.post("/api/chat", async (req, res) => {
@@ -80,33 +81,24 @@ app.post("/api/chat", async (req, res) => {
       });
     }
 
+ // Create agent for the currently selected video
+const agent = createVideoAgent(videoId);
 
-    // Include videoId so the agent knows which transcript to search
-    const result = await agent.invoke(
+const result = await agent.invoke(
+  {
+    messages: [
       {
-        messages: [
-          {
-            role: "user",
-
-            content: `
-Current YouTube video ID: ${videoId}
-
-User question:
-${message}
-
-When using the retrieve tool, use this videoId:
-${videoId}
-`,
-          },
-        ],
+        role: "user",
+        content: message,
       },
-
-      {
-        configurable: {
-          thread_id: threadId,
-        },
-      }
-    );
+    ],
+  },
+  {
+    configurable: {
+      thread_id: threadId,
+    },
+  }
+);
 
 
     const finalMessage =
