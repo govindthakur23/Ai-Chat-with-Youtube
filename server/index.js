@@ -32,13 +32,18 @@ app.post("/api/video", async (req, res) => {
       });
     }
 
-    // 1. Get transcript from Bright Data
+    // Get video data from Bright Data
     const video = await scrapeYouTubeVideo(url);
 
-    // 2. Convert transcript to embeddings and store in pgvector
+    // Check which fields Bright Data returned
+    console.log(
+      "Bright Data video fields:",
+      Object.keys(video)
+    );
+
+    // Store transcript in pgvector
     const stored = await addVideoToVectorStore(video);
 
-    // 3. Return the videoId to frontend
     res.json({
       video_id: video.video_id,
       title: video.title,
@@ -57,8 +62,6 @@ app.post("/api/video", async (req, res) => {
     });
   }
 });
-
-console.log("Bright Data video fields:", Object.keys(video));
 
 // Chat with currently selected video
 app.post("/api/chat", async (req, res) => {
