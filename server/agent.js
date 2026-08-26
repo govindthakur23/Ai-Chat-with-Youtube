@@ -9,7 +9,7 @@ import { z } from "zod";
 import { searchVideoTranscript } from "./embeddings.js";
 
 const llm = new ChatGoogleGenerativeAI({
-  model: "gemini-2.5-flash",
+  model: "gemini-3.6-flash",
   temperature: 0,
   apiKey: process.env.GEMINI_API_KEY,
 });
