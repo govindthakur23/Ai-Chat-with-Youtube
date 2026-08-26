@@ -1,17 +1,17 @@
 import "dotenv/config";
 
 import { tool } from "@langchain/core/tools";
-import { ChatOpenRouter } from "@langchain/openrouter";
+import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { createAgent } from "langchain";
 import { MemorySaver } from "@langchain/langgraph";
 import { z } from "zod";
 
 import { searchVideoTranscript } from "./embeddings.js";
 
-const llm = new ChatOpenRouter({
-  model: "openai/gpt-oss-20b:free",
+const llm = new ChatGoogleGenerativeAI({
+  model: "gemini-2.5-flash",
   temperature: 0,
-  apiKey: process.env.OPEN_API_KEY,
+  apiKey: process.env.GEMINI_API_KEY,
 });
 
 const memorySaver = new MemorySaver();
