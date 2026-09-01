@@ -1,10 +1,19 @@
 import { useState, useRef, useEffect } from 'react';
 import './index.css';
 
+interface Source {
+  video_id: string;
+  title?: string;
+  start_time?: number;
+  end_time?: number;
+  text: string;
+}
+
 interface Message {
   id: number;
   text: string;
   isUser: boolean;
+  sources?: Source[];
 }
 
 function App() {
@@ -50,6 +59,26 @@ function App() {
       return false;
     }
   };
+
+  const formatTimestamp = (seconds: number) => {
+    const value = Math.max(0, Math.floor(seconds));
+    const hours = Math.floor(value / 3600);
+    const minutes = Math.floor((value % 3600) / 60);
+    const remainingSeconds = value % 60;
+
+    if (hours > 0) {
+      return `${hours}:${String(minutes).padStart(2, '0')}:${String(
+        remainingSeconds
+      ).padStart(2, '0')}`;
+    }
+
+    return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`;
+  };
+
+  const getYouTubeTimestampUrl = (source: Source) =>
+    `https://www.youtube.com/watch?v=${source.video_id}&t=${Math.floor(
+      source.start_time || 0
+    )}s`;
 
   const sendMessage = async () => {
     if (inputText.trim() === '' || isLoading) return;
@@ -154,6 +183,9 @@ function App() {
         id: Date.now() + 1,
         text: data.answer,
         isUser: false,
+        sources: Array.isArray(data.sources)
+          ? data.sources
+          : [],
       };
 
       setMessages((prev) => [...prev, aiMessage]);
@@ -228,7 +260,48 @@ function App() {
               </div>
 
               <div className='message-content'>
-                {message.text}
+                <div>{message.text}</div>
+
+                {!message.isUser &&
+                  message.sources &&
+                  message.sources.length > 0 && (
+                    <div className='sources'>
+                      <div className='sources-title'>
+                        Sources
+                      </div>
+
+                      {message.sources.map((source, index) => {
+                        const hasTimestamp =
+                          typeof source.start_time === 'number';
+
+                        return (
+                          <div
+                            key={`${source.video_id}-${source.start_time ?? index}-${index}`}
+                            className='source-item'
+                          >
+                            {hasTimestamp ? (
+                              <a
+                                href={getYouTubeTimestampUrl(source)}
+                                target='_blank'
+                                rel='noreferrer'
+                                className='source-link'
+                              >
+                                ▶ {formatTimestamp(source.start_time || 0)}
+                              </a>
+                            ) : (
+                              <span className='source-label'>
+                                Source {index + 1}
+                              </span>
+                            )}
+
+                            <div className='source-text'>
+                              {source.text}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
               </div>
             </div>
           ))

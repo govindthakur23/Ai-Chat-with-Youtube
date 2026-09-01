@@ -133,6 +133,50 @@ body {
   white-space: pre-wrap;
 }
 
+.sources {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-color);
+  white-space: normal;
+}
+
+.sources-title {
+  margin-bottom: 8px;
+  color: var(--secondary-text-color);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.source-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.source-link,
+.source-label {
+  align-self: flex-start;
+  color: var(--primary-color);
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.source-link:hover {
+  text-decoration: underline;
+}
+
+.source-text {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--secondary-text-color);
+  font-size: 0.85rem;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
 .loading {
   display: flex;
   gap: 6px;
