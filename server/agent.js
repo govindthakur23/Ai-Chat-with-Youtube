@@ -8,13 +8,23 @@ import { z } from "zod";
 
 import { searchVideoTranscript } from "./embeddings.js";
 
-const llm = new ChatGoogleGenerativeAI({
-  model: "gemini-3.5-flash-lite",
-  temperature: 0,
-  apiKey: process.env.GEMINI_API_KEY,
-});
+export const GEMINI_PRIMARY_MODEL =
+  process.env.GEMINI_PRIMARY_MODEL || "gemini-3.5-flash-lite";
+export const GEMINI_FALLBACK_MODEL =
+  process.env.GEMINI_FALLBACK_MODEL || "gemini-3.5-flash";
+
+const PRIMARY_RETRY_DELAYS = [2000, 4000];
+
+const createLLM = (modelName) =>
+  new ChatGoogleGenerativeAI({
+    model: modelName,
+    temperature: 0,
+    apiKey: process.env.GEMINI_API_KEY,
+  });
 
 const memorySaver = new MemorySaver();
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const toNumber = (value) => {
   const number = Number(value);
@@ -87,9 +97,61 @@ Timestamp: ${timestamp}
 Transcript: ${source.text}`;
 };
 
+const getErrorStatus = (error) =>
+  error?.status ||
+  error?.statusCode ||
+  error?.response?.status ||
+  error?.error?.code ||
+  error?.code;
+
+const getSafeErrorMessage = (error) =>
+  String(error?.message || error || "").slice(0, 240);
+
+const isRetryableGeminiError = (error) => {
+  const status = Number(getErrorStatus(error));
+  const message = getSafeErrorMessage(error);
+
+  if (
+    /\b(400|401|403|404)\b/.test(message) ||
+    /api key|permission|unauthorized|forbidden|not found|invalid argument/i.test(
+      message
+    )
+  ) {
+    return false;
+  }
+
+  return (
+    status === 429 ||
+    status === 503 ||
+    /429|503|too many requests|service unavailable|high demand|temporar/i.test(
+      message
+    ) ||
+    /resource_exhausted|unavailable/i.test(message)
+  );
+};
+
+const createTemporaryAIServiceError = () => {
+  const error = new Error(
+    "AI service is temporarily unavailable. Please try again shortly."
+  );
+
+  error.code = "AI_SERVICE_TEMPORARILY_UNAVAILABLE";
+  error.status = 503;
+
+  return error;
+};
+
+const logTemporaryFailure = (label, error) => {
+  console.warn(
+    `[LLM] ${label} temporary failure:`,
+    getErrorStatus(error) || "unknown",
+    getSafeErrorMessage(error)
+  );
+};
+
 
 // Create an agent locked to one video
-export const createVideoAgent = (videoId) => {
+export const createVideoAgent = (videoId, modelName = GEMINI_PRIMARY_MODEL) => {
   let retrievedSources = [];
 
   // Tool already knows the current videoId
@@ -135,7 +197,7 @@ export const createVideoAgent = (videoId) => {
 
 
   const agent = createAgent({
-    model: llm,
+    model: createLLM(modelName),
 
     tools: [retrieveTool],
 
@@ -161,4 +223,111 @@ IMPORTANT:
   agent.getSources = () => dedupeSources(retrievedSources);
 
   return agent;
+};
+
+const invokeAgent = async ({
+  videoId,
+  message,
+  threadId,
+  modelName,
+}) => {
+  const agent = createVideoAgent(videoId, modelName);
+  const result = await agent.invoke(
+    {
+      messages: [
+        {
+          role: "user",
+          content: message,
+        },
+      ],
+    },
+    {
+      configurable: {
+        thread_id: threadId,
+      },
+    }
+  );
+
+  return {
+    result,
+    sources:
+      typeof agent.getSources === "function"
+        ? agent.getSources()
+        : [],
+  };
+};
+
+export const invokeVideoAgentWithFallback = async ({
+  videoId,
+  message,
+  threadId,
+}) => {
+  console.log("[LLM] primary:", GEMINI_PRIMARY_MODEL);
+
+  let lastRetryableError;
+
+  for (
+    let attempt = 0;
+    attempt <= PRIMARY_RETRY_DELAYS.length;
+    attempt += 1
+  ) {
+    try {
+      const response = await invokeAgent({
+        videoId,
+        message,
+        threadId,
+        modelName: GEMINI_PRIMARY_MODEL,
+      });
+
+      return {
+        ...response,
+        model: GEMINI_PRIMARY_MODEL,
+      };
+    } catch (error) {
+      if (!isRetryableGeminiError(error)) {
+        throw error;
+      }
+
+      lastRetryableError = error;
+      logTemporaryFailure("primary", error);
+
+      const retryDelay = PRIMARY_RETRY_DELAYS[attempt];
+
+      if (retryDelay === undefined) {
+        break;
+      }
+
+      console.log("[LLM] retrying primary: attempt", attempt + 2);
+      await sleep(retryDelay);
+    }
+  }
+
+  if (GEMINI_FALLBACK_MODEL === GEMINI_PRIMARY_MODEL) {
+    throw createTemporaryAIServiceError();
+  }
+
+  console.log("[LLM] switching to fallback:", GEMINI_FALLBACK_MODEL);
+
+  try {
+    const response = await invokeAgent({
+      videoId,
+      message,
+      threadId,
+      modelName: GEMINI_FALLBACK_MODEL,
+    });
+
+    console.log("[LLM] fallback succeeded");
+
+    return {
+      ...response,
+      model: GEMINI_FALLBACK_MODEL,
+    };
+  } catch (error) {
+    if (isRetryableGeminiError(error)) {
+      logTemporaryFailure("fallback", error);
+      throw createTemporaryAIServiceError();
+    }
+
+    throw error || lastRetryableError;
+  }
 };

@@ -2,7 +2,7 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 
-import { createVideoAgent } from "./agent.js";
+import { invokeVideoAgentWithFallback } from "./agent.js";
 import { scrapeYouTubeVideo } from "./youtube.js";
 import {
   addVideoToVectorStore,
@@ -141,24 +141,11 @@ app.post("/api/chat", async (req, res) => {
       });
     }
 
- // Create agent for the currently selected video
-const agent = createVideoAgent(videoId);
-
-const result = await agent.invoke(
-  {
-    messages: [
-      {
-        role: "user",
-        content: message,
-      },
-    ],
-  },
-  {
-    configurable: {
-      thread_id: threadId,
-    },
-  }
-);
+    const { result, sources } = await invokeVideoAgentWithFallback({
+      videoId,
+      message,
+      threadId,
+    });
 
 
     const finalMessage =
@@ -167,14 +154,17 @@ const result = await agent.invoke(
 
     res.json({
       answer: finalMessage.content,
-      sources:
-        typeof agent.getSources === "function"
-          ? formatSourcesForResponse(agent.getSources())
-          : [],
+      sources: formatSourcesForResponse(sources),
     });
 
   } catch (error) {
     console.error(error);
+
+    if (error.code === "AI_SERVICE_TEMPORARILY_UNAVAILABLE") {
+      return res.status(503).json({
+        error: "AI service is temporarily unavailable. Please try again shortly.",
+      });
+    }
 
     res.status(500).json({
       error: error.message,
