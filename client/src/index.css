@@ -167,16 +167,6 @@ body {
   text-decoration: underline;
 }
 
-.source-text {
-  display: -webkit-box;
-  overflow: hidden;
-  color: var(--secondary-text-color);
-  font-size: 0.85rem;
-  line-height: 1.4;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-}
-
 .loading {
   display: flex;
   gap: 6px;

@@ -42,6 +42,9 @@ const extractYouTubeVideoId = (url) => {
   }
 };
 
+const formatSourcesForResponse = (sources) =>
+  sources.map(({ text, ...source }) => source);
+
 
 // Health check
 app.get("/api/health", (req, res) => {
@@ -166,7 +169,7 @@ const result = await agent.invoke(
       answer: finalMessage.content,
       sources:
         typeof agent.getSources === "function"
-          ? agent.getSources()
+          ? formatSourcesForResponse(agent.getSources())
           : [],
     });
 

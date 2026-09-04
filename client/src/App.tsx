@@ -6,7 +6,6 @@ interface Source {
   title?: string;
   start_time?: number;
   end_time?: number;
-  text: string;
 }
 
 interface Message {
@@ -77,8 +76,48 @@ function App() {
 
   const getYouTubeTimestampUrl = (source: Source) =>
     `https://www.youtube.com/watch?v=${source.video_id}&t=${Math.floor(
-      source.start_time || 0
+      source.start_time as number
     )}s`;
+
+  const dedupeDisplayedSources = (sources: Source[]) => {
+    const timestampWindowSeconds = 8;
+    const displayedSources: Source[] = [];
+
+    for (const source of sources) {
+      if (
+        typeof source.start_time !== 'number' ||
+        !Number.isFinite(source.start_time) ||
+        source.start_time < 0
+      ) {
+        if (
+          !displayedSources.some(
+            (displayedSource) =>
+              displayedSource.video_id === source.video_id &&
+              displayedSource.title === source.title &&
+              displayedSource.start_time === undefined
+          )
+        ) {
+          displayedSources.push(source);
+        }
+
+        continue;
+      }
+
+      const alreadyDisplayed = displayedSources.some(
+        (displayedSource) =>
+          displayedSource.video_id === source.video_id &&
+          typeof displayedSource.start_time === 'number' &&
+          Math.abs(displayedSource.start_time - source.start_time!) <=
+            timestampWindowSeconds
+      );
+
+      if (!alreadyDisplayed) {
+        displayedSources.push(source);
+      }
+    }
+
+    return displayedSources;
+  };
 
   const sendMessage = async () => {
     if (inputText.trim() === '' || isLoading) return;
@@ -267,12 +306,16 @@ function App() {
                   message.sources.length > 0 && (
                     <div className='sources'>
                       <div className='sources-title'>
-                        Sources
+                        {message.sources[0]?.title
+                          ? `Sources - ${message.sources[0].title}`
+                          : 'Sources'}
                       </div>
 
-                      {message.sources.map((source, index) => {
+                      {dedupeDisplayedSources(message.sources).map((source, index) => {
                         const hasTimestamp =
-                          typeof source.start_time === 'number';
+                          typeof source.start_time === 'number' &&
+                          Number.isFinite(source.start_time) &&
+                          source.start_time >= 0;
 
                         return (
                           <div
@@ -286,7 +329,7 @@ function App() {
                                 rel='noreferrer'
                                 className='source-link'
                               >
-                                ▶ {formatTimestamp(source.start_time || 0)}
+                                ▶ {formatTimestamp(source.start_time)}
                               </a>
                             ) : (
                               <span className='source-label'>
@@ -294,9 +337,6 @@ function App() {
                               </span>
                             )}
 
-                            <div className='source-text'>
-                              {source.text}
-                            </div>
                           </div>
                         );
                       })}

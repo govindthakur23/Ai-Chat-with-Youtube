@@ -57,6 +57,8 @@ const SPECIFIC_SELECTED_LIMIT = 8;
 const BROAD_SIMILARITY_LIMIT = 36;
 const BROAD_COVERAGE_LIMIT = 12;
 const BROAD_SELECTED_LIMIT = 18;
+const TIMESTAMPED_CHUNK_SIZE = 450;
+const TIMESTAMPED_CHUNK_MAX_SECONDS = 30;
 
 const broadQueryPattern =
   /\b(summarize|summary|overview|key points|main points|important points|topics covered|what.*discuss|what.*about|overall|high level|takeaways)\b/i;
@@ -103,12 +105,61 @@ const toNumber = (value) => {
   return Number.isFinite(number) ? number : undefined;
 };
 
-const getTimestampScale = (segments, videoLength) => {
-  const maxEndTime = Math.max(
-    ...segments.map((segment) => Number(segment.end_time || 0))
-  );
+const parseTimestampValue = (value) => {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? { value, kind: "number" } : null;
+  }
 
-  if (videoLength && maxEndTime > videoLength + 60) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmedValue = value.trim();
+
+  if (!trimmedValue) {
+    return null;
+  }
+
+  if (trimmedValue.includes(":")) {
+    const parts = trimmedValue.split(":").map(Number);
+
+    if (
+      parts.length < 2 ||
+      parts.length > 3 ||
+      parts.some((part) => !Number.isFinite(part) || part < 0)
+    ) {
+      return null;
+    }
+
+    const seconds =
+      parts.length === 3
+        ? parts[0] * 3600 + parts[1] * 60 + parts[2]
+        : parts[0] * 60 + parts[1];
+
+    return {
+      value: seconds,
+      kind: "timecode",
+    };
+  }
+
+  const number = Number(trimmedValue);
+
+  return Number.isFinite(number)
+    ? { value: number, kind: "number" }
+    : null;
+};
+
+const getTimestampScale = (segments, videoLength) => {
+  const numericEndTimes = segments
+    .map((segment) => parseTimestampValue(segment.end_time))
+    .filter((timestamp) => timestamp?.kind === "number")
+    .map((timestamp) => timestamp.value);
+  const maxEndTime = Math.max(0, ...numericEndTimes);
+
+  if (
+    videoLength &&
+    maxEndTime > videoLength + 60
+  ) {
     return 1000;
   }
 
@@ -116,13 +167,72 @@ const getTimestampScale = (segments, videoLength) => {
 };
 
 const normalizeTimestamp = (value, scale) => {
-  const number = toNumber(value);
+  const parsedTimestamp = parseTimestampValue(value);
 
-  if (number === undefined) {
+  if (
+    !parsedTimestamp ||
+    parsedTimestamp.value < 0
+  ) {
     return undefined;
   }
 
-  return Math.max(0, Math.floor(number / scale));
+  const seconds =
+    parsedTimestamp.kind === "timecode"
+      ? parsedTimestamp.value
+      : parsedTimestamp.value / scale;
+
+  return Math.floor(seconds);
+};
+
+const getSegmentStart = (segment, scale) =>
+  normalizeTimestamp(segment.start_time, scale);
+
+const getSegmentEnd = (segment, scale) =>
+  normalizeTimestamp(segment.end_time, scale);
+
+const createChunkMetadata = (video, chunks, firstSegment, lastSegment, scale) => {
+  const metadata = {
+    video_id: video.video_id,
+    title: video.title,
+    chunk_index: chunks.length,
+    source: "formatted_transcript",
+  };
+  const startTime = getSegmentStart(firstSegment, scale);
+  const endTime = getSegmentEnd(lastSegment, scale);
+
+  if (startTime !== undefined) {
+    metadata.start_time = startTime;
+  }
+
+  if (endTime !== undefined) {
+    metadata.end_time = endTime;
+  }
+
+  return metadata;
+};
+
+const shouldStartNewTimestampedChunk = (
+  currentSegments,
+  currentLength,
+  segment,
+  text,
+  scale
+) => {
+  if (!currentSegments.length) {
+    return false;
+  }
+
+  const currentStart = getSegmentStart(currentSegments[0], scale);
+  const segmentEnd = getSegmentEnd(segment, scale);
+  const wouldExceedDuration =
+    currentStart !== undefined &&
+    segmentEnd !== undefined &&
+    segmentEnd - currentStart > TIMESTAMPED_CHUNK_MAX_SECONDS;
+
+  return (
+    currentLength + text.length > TIMESTAMPED_CHUNK_SIZE ||
+    wouldExceedDuration
+  );
 };
 
 const getTimestampedSegments = (video) => {
@@ -140,7 +250,6 @@ const getTimestampedSegments = (video) => {
 };
 
 const createTimestampedTranscriptChunks = (video, segments) => {
-  const chunkSize = 1000;
   const scale = getTimestampScale(
     segments,
     Number(video.video_length || 0)
@@ -163,20 +272,13 @@ const createTimestampedTranscriptChunks = (video, segments) => {
     chunks.push(
       new Document({
         pageContent,
-        metadata: {
-          video_id: video.video_id,
-          title: video.title,
-          chunk_index: chunks.length,
-          start_time: normalizeTimestamp(
-            firstSegment.start_time,
-            scale
-          ),
-          end_time: normalizeTimestamp(
-            lastSegment.end_time,
-            scale
-          ),
-          source: "formatted_transcript",
-        },
+        metadata: createChunkMetadata(
+          video,
+          chunks,
+          firstSegment,
+          lastSegment,
+          scale
+        ),
       })
     );
 
@@ -187,7 +289,15 @@ const createTimestampedTranscriptChunks = (video, segments) => {
   for (const segment of segments) {
     const text = segment.text.trim();
 
-    if (currentSegments.length && currentLength + text.length > chunkSize) {
+    if (
+      shouldStartNewTimestampedChunk(
+        currentSegments,
+        currentLength,
+        segment,
+        text,
+        scale
+      )
+    ) {
       pushChunk();
     }
 
